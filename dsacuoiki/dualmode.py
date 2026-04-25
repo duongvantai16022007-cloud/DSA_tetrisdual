@@ -41,37 +41,35 @@ class Block():
         for _ in range(3):
             self.rotate()
 
-class Game():
-    def __init__(self):
-        pygame.init()
-        self.font = pygame.font.SysFont('Consolas', 24, bold=True)
-        self.game_over_font = pygame.font.SysFont('Consolas', 60, bold=True)
+class TetrisBoard():
+    def __init__(self, screen, offset_x, title, controls):
+        self.screen = screen
+        self.offset_x = offset_x
+        self.title = title
+        self.controls = controls
         
-        window_width = GRID_WIDTH * CELL_SIZE + 200
-        window_height = GRID_HEIGHT * CELL_SIZE
-        self.screen = pygame.display.set_mode((window_width, window_height))
-        pygame.display.set_caption("Tetris Solo - DSA Project")
-        self.clock = pygame.time.Clock()
-
+        self.font = pygame.font.SysFont('Consolas', 24, bold=True)
+        self.game_over_font = pygame.font.SysFont('Consolas', 50, bold=True)
+        
         self.grid = [[0 for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
         self.score = 0
         self.game_over = False
 
         self.next_queue = []
-        self.them_vao()
+        self.fill_queue() 
         self.current_piece = self.next_queue.pop(0)
         self.held_piece = None
-        self.can_swap = True
+        self.can_swap = True 
 
         self.fall_time = 0
-        self.fall_speed = 300 
+        self.fall_speed = 350
 
-    def random_block(self):
+    def get_random_block(self):
         return Block(random.choice(list(SHAPES.keys())))
 
-    def them_vao(self):
+    def fill_queue(self):
         while len(self.next_queue) < 4:
-            self.next_queue.append(self.random_block())
+            self.next_queue.append(self.get_random_block())
 
     def is_collision(self, nblock: Block):
         for i, row in enumerate(nblock.matrix):
@@ -83,25 +81,25 @@ class Game():
                         return True
         return False
 
-    def after_collision(self):
+    def lock_piece(self):
         for i, row in enumerate(self.current_piece.matrix):
             for j, cell in enumerate(row):
                 if cell != 0:
                     if self.current_piece.y + i >= 0:
                         self.grid[self.current_piece.y + i][self.current_piece.x + j] = self.current_piece.color
 
-    def clear_score(self):
-        line = 0
+    def clear_lines(self):
+        line_count = 0
         i = GRID_HEIGHT - 1
         while i >= 0:
             if 0 not in self.grid[i]:
-                line +=1
+                line_count += 1
                 del self.grid[i]
                 self.grid.insert(0, [0 for _ in range(GRID_WIDTH)])
             else:
                 i -= 1
-        if line > 0:
-            self.score += (line * 100) * line
+        if line_count > 0:
+            self.score += (line_count * 100) * line_count
 
     def get_ghost(self):
         ghost = copy.deepcopy(self.current_piece)
@@ -110,8 +108,8 @@ class Game():
         ghost.y -= 1
         return ghost
 
-    def __game_over_logic(self):
-        self.them_vao()
+    def spawn_next(self):
+        self.fill_queue()
         self.current_piece = self.next_queue.pop(0)
         self.can_swap = True
         if self.is_collision(self.current_piece):
@@ -119,28 +117,28 @@ class Game():
 
     def handle_input(self, event):
         if event.type == pygame.KEYDOWN and not self.game_over:
-            if event.key == pygame.K_LEFT:
+            if event.key == self.controls['LEFT']:
                 self.current_piece.x -= 1
                 if self.is_collision(self.current_piece): self.current_piece.x += 1
-            elif event.key == pygame.K_RIGHT:
+            elif event.key == self.controls['RIGHT']:
                 self.current_piece.x += 1
                 if self.is_collision(self.current_piece): self.current_piece.x -= 1
-            elif event.key == pygame.K_DOWN:
+            elif event.key == self.controls['DOWN']:
                 self.current_piece.y += 1
                 if self.is_collision(self.current_piece): self.current_piece.y -= 1
-            elif event.key == pygame.K_UP:
+            elif event.key == self.controls['UP']:
                 self.current_piece.rotate()
                 if self.is_collision(self.current_piece): self.current_piece.rotate_back()
-            elif event.key == pygame.K_SPACE:
+            elif event.key == self.controls['DROP']:
                 ghost = self.get_ghost()
                 self.current_piece.y = ghost.y
-                self.after_collision()
-                self.clear_score()
-                self.__game_over_logic()
-            elif (event.key == pygame.K_LSHIFT or event.key == pygame.K_RSHIFT or event.key == pygame.K_c) and self.can_swap:
+                self.lock_piece()
+                self.clear_lines()
+                self.spawn_next()
+            elif event.key == self.controls['HOLD'] and self.can_swap:
                 if self.held_piece is None:
                     self.held_piece = self.current_piece
-                    self.__game_over_logic() 
+                    self.spawn_next()
                 else:
                     self.current_piece, self.held_piece = self.held_piece, self.current_piece
                     self.current_piece.x = 3
@@ -148,24 +146,23 @@ class Game():
                     self.current_piece.matrix = copy.deepcopy(SHAPES[self.current_piece.name])
                 self.can_swap = False
 
-    def update(self):
-        if self.game_over: return 
-        self.fall_time += self.clock.get_rawtime()
-        
+    def update(self, dt):
+        if self.game_over: return
+        self.fall_time += dt
         if self.fall_time >= self.fall_speed:
             self.current_piece.y += 1
             if self.is_collision(self.current_piece):
                 self.current_piece.y -= 1
-                self.after_collision()
-                self.clear_score()
-                self.__game_over_logic()
+                self.lock_piece()
+                self.clear_lines()
+                self.spawn_next()
             self.fall_time = 0
 
     def draw_piece(self, piece, start_x=0, start_y=0, is_ghost=False, scale=1.0):
         for i, row in enumerate(piece.matrix):
             for j, cell in enumerate(row):
                 if cell != 0:
-                    x = start_x + (piece.x + j) * (CELL_SIZE * scale)
+                    x = self.offset_x + start_x + (piece.x + j) * (CELL_SIZE * scale)
                     y = start_y + (piece.y + i) * (CELL_SIZE * scale)
                     rect = pygame.Rect(x, y, CELL_SIZE * scale, CELL_SIZE * scale)
                     if is_ghost:
@@ -175,77 +172,86 @@ class Game():
                         pygame.draw.rect(self.screen, (255, 255, 255), rect, 1)
 
     def draw(self):
-        self.screen.fill((20, 20, 20)) 
+        grid_rect = pygame.Rect(self.offset_x, 0, GRID_WIDTH * CELL_SIZE, GRID_HEIGHT * CELL_SIZE)
+        pygame.draw.rect(self.screen, (50, 50, 50), grid_rect, 2)
         
-        score_text = self.font.render(f"SCORE:", True, (255, 255, 255))
-        score_val = self.font.render(f"{self.score}", True, (0, 255, 255))
-        self.screen.blit(score_text, (GRID_WIDTH * CELL_SIZE + 20, 20))
-        self.screen.blit(score_val, (GRID_WIDTH * CELL_SIZE + 20, 50))
-
-        pygame.draw.rect(self.screen, (30, 30, 30), (GRID_WIDTH * CELL_SIZE + 10, 100, 180, 250))
-        self.screen.blit(self.font.render("NEXT:", True, (255, 255, 255)), (GRID_WIDTH * CELL_SIZE + 20, 110))
-        
-        preview_1 = copy.deepcopy(self.next_queue[0])
-        preview_1.x, preview_1.y = 0, 0
-        self.draw_piece(preview_1, start_x=GRID_WIDTH * CELL_SIZE + 50, start_y=150, scale=0.7)
-        
-        preview_2 = copy.deepcopy(self.next_queue[1])
-        preview_2.x, preview_2.y = 0, 0
-        self.draw_piece(preview_2, start_x=GRID_WIDTH * CELL_SIZE + 50, start_y=240, scale=0.7)
-
-        pygame.draw.rect(self.screen, (30, 30, 30), (GRID_WIDTH * CELL_SIZE + 10, 370, 180, 120))
-        self.screen.blit(self.font.render("HOLD:", True, (255, 255, 255)), (GRID_WIDTH * CELL_SIZE + 20, 380))
-        if self.held_piece:
-            hold_preview = copy.deepcopy(self.held_piece)
-            hold_preview.x, hold_preview.y = 0, 0
-            self.draw_piece(hold_preview, start_x=GRID_WIDTH * CELL_SIZE + 50, start_y=410, scale=0.7)
-
-        pygame.draw.line(self.screen, (100, 100, 100), (GRID_WIDTH * CELL_SIZE, 0), (GRID_WIDTH * CELL_SIZE, GRID_HEIGHT * CELL_SIZE), 2)
         for r in range(GRID_HEIGHT):
             for c in range(GRID_WIDTH):
-                rect = pygame.Rect(c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-                if self.grid[r][c] == 0:
-                    pygame.draw.rect(self.screen, (40, 40, 40), rect, 1) 
-                else:
-                    pygame.draw.rect(self.screen, self.grid[r][c], rect) 
+                rect = pygame.Rect(self.offset_x + c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                if self.grid[r][c] != 0:
+                    pygame.draw.rect(self.screen, self.grid[r][c], rect)
                     pygame.draw.rect(self.screen, (255, 255, 255), rect, 1)
+                else:
+                    pygame.draw.rect(self.screen, (35, 35, 35), rect, 1)
+
+        panel_x = self.offset_x + GRID_WIDTH * CELL_SIZE + 20
+        self.screen.blit(self.font.render(self.title, True, (255, 255, 0)), (panel_x, 10))
+        self.screen.blit(self.font.render(f"SCORE: {self.score}", True, (0, 255, 255)), (panel_x, 45))
+
+        pygame.draw.rect(self.screen, (30, 30, 30), (panel_x - 10, 80, 180, 250))
+        self.screen.blit(self.font.render("NEXT:", True, (255, 255, 255)), (panel_x, 90))
+        p_next = copy.deepcopy(self.next_queue[0])
+        p_next.x, p_next.y = 0, 0
+        self.draw_piece(p_next, start_x=GRID_WIDTH * CELL_SIZE + 50, start_y=130, scale=0.7)
+        
+        p_next_2 = copy.deepcopy(self.next_queue[1])
+        p_next_2.x, p_next_2.y = 0, 0
+        self.draw_piece(p_next_2, start_x=GRID_WIDTH * CELL_SIZE + 50, start_y=220, scale=0.7)
+
+        pygame.draw.rect(self.screen, (30, 30, 30), (panel_x - 10, 350, 180, 120))
+        self.screen.blit(self.font.render("HOLD:", True, (255, 255, 255)), (panel_x, 360))
+        if self.held_piece:
+            p_hold = copy.deepcopy(self.held_piece)
+            p_hold.x, p_hold.y = 0, 0
+            self.draw_piece(p_hold, start_x=GRID_WIDTH * CELL_SIZE + 50, start_y=390, scale=0.7)
 
         if not self.game_over:
-            ghost_piece = self.get_ghost()
-            self.draw_piece(ghost_piece, is_ghost=True)
+            self.draw_piece(self.get_ghost(), is_ghost=True)
             self.draw_piece(self.current_piece)
         else:
-            game_over_txt = self.game_over_font.render("GAME OVER", True, (255, 50, 50))
-            text_rect = game_over_txt.get_rect()
-            grid_width = GRID_WIDTH * CELL_SIZE
-            grid_height = GRID_HEIGHT * CELL_SIZE
-            text_x = (grid_width // 2) - (text_rect.width // 2)
-            text_y = (grid_height // 2) - (text_rect.height // 2)
-            self.screen.blit(game_over_txt, (text_x, text_y))
+            msg = self.game_over_font.render("GAME OVER", True, (255, 50, 50))
+            m_rect = msg.get_rect(center=(self.offset_x + (GRID_WIDTH * CELL_SIZE)//2, (GRID_HEIGHT * CELL_SIZE)//2))
+            self.screen.blit(msg, m_rect)
 
-            final_score_txt = self.font.render(f"Final Score: {self.score}", True, (255, 255, 255))
-            score_rect = final_score_txt.get_rect()
-            score_x = (grid_width // 2) - (score_rect.width // 2)
-            score_y = text_y + text_rect.height + 20
-            self.screen.blit(final_score_txt, (score_x, score_y))
+class TetrisDualApp():
+    def __init__(self):
+        pygame.init()
+        self.board_w = GRID_WIDTH * CELL_SIZE + 200
+        self.margin = 20
+        self.screen = pygame.display.set_mode((self.board_w * 2 + self.margin, GRID_HEIGHT * CELL_SIZE))
+        pygame.display.set_caption("Tetris Dual PvP - DSA Project")
+        self.clock = pygame.time.Clock()
 
-        pygame.display.flip()
+        p1_keys = {'LEFT': pygame.K_a, 'RIGHT': pygame.K_d, 'DOWN': pygame.K_s, 'UP': pygame.K_w, 'DROP': pygame.K_SPACE, 'HOLD': pygame.K_LSHIFT}
+        p2_keys = {'LEFT': pygame.K_LEFT, 'RIGHT': pygame.K_RIGHT, 'DOWN': pygame.K_DOWN, 'UP': pygame.K_UP, 'DROP': pygame.K_RETURN, 'HOLD': pygame.K_RSHIFT}
+
+        self.p1 = TetrisBoard(self.screen, 0, "PLAYER 1 (WASD)", p1_keys)
+        self.p2 = TetrisBoard(self.screen, self.board_w + self.margin, "PLAYER 2 (Arrows)", p2_keys)
 
     def run(self):
         running = True
         while running:
-            self.clock.tick(60) 
+            dt = self.clock.tick(60)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False 
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False 
-                self.handle_input(event)
+                
+                self.p1.handle_input(event)
+                self.p2.handle_input(event)
 
-            self.update()
-            self.draw()
+            self.p1.update(dt)
+            self.p2.update(dt)
+
+            self.screen.fill((15, 15, 15))
+            pygame.draw.line(self.screen, (80, 80, 80), (self.board_w + 10, 0), (self.board_w + 10, GRID_HEIGHT * CELL_SIZE), 2)
+            self.p1.draw()
+            self.p2.draw()
+            pygame.display.flip()
+            
         return 
 
 if __name__ == "__main__":
-    game_instance = Game()
-    game_instance.run()
+    app = TetrisDualApp()
+    app.run()
